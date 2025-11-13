@@ -93,10 +93,14 @@ class WXRExporter:
         """Rewrite Wayback URLs to original URLs."""
         pattern = re.compile(r'https?://web\.archive\.org/web/\d+[a-z_]*/(https?://[^"\s]+)')
         
-        for attr in ['href', 'src', 'srcset']:
-            for tag in soup.find_all(**{attr: True}):
-                value = tag[attr]
-                tag[attr] = pattern.sub(r'\1', value)
+        # Handle standard and lazy-loading attributes
+        attrs_to_check = ['href', 'src', 'srcset', 'data-src', 'data-lazy-src', 'data-original', 'data-lazy-original']
+        
+        for attr in attrs_to_check:
+            for tag in soup.find_all(attrs={attr: True}):
+                if tag.has_attr(attr):
+                    value = tag[attr]
+                    tag[attr] = pattern.sub(r'\1', value)
     
     def extract_title(self, soup: BeautifulSoup) -> str:
         """Extract post title."""
