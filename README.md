@@ -331,12 +331,6 @@ Built using:
 - python-dateutil for flexible date parsing
 - lxml for XML processing
 
-## Support
-
-- Issues: https://github.com/stardothosting/shift8-waybackpress/issues
-- Discussions: https://github.com/stardothosting/shift8-waybackpress/discussions
-- Email: info@shift8web.ca
-
 ## Changelog
 
 ### 0.1.0 (Initial Release)

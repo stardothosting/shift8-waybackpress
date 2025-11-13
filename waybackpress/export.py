@@ -198,24 +198,40 @@ class WXRExporter:
         return content
     
     def extract_categories(self, soup: BeautifulSoup) -> List[str]:
-        """Extract post categories."""
+        """Extract post categories using rel attribute."""
         categories = []
+        seen = set()
         
-        for link in soup.select('a[rel="category tag"], .cat-links a, .category a'):
-            cat = link.get_text(strip=True)
-            if cat and cat not in categories:
-                categories.append(cat)
+        # Find categories using rel="category tag" or rel="category"
+        for link in soup.find_all('a', href=True, rel=True):
+            rel = ' '.join(link.get('rel', []))
+            href = link['href']
+            text = link.get_text(strip=True)
+            
+            # Look for rel="category tag" or rel="category" with /category/ in URL
+            if 'category' in rel and '/category/' in href and text:
+                if text not in seen:
+                    categories.append(text)
+                    seen.add(text)
         
         return categories
     
     def extract_tags(self, soup: BeautifulSoup) -> List[str]:
-        """Extract post tags."""
+        """Extract post tags using rel attribute."""
         tags = []
+        seen = set()
         
-        for link in soup.select('a[rel="tag"], .tag-links a, .tags a'):
-            tag = link.get_text(strip=True)
-            if tag and tag not in tags:
-                tags.append(tag)
+        # Find tags using rel="tag" (not "category tag")
+        for link in soup.find_all('a', href=True, rel=True):
+            rel = ' '.join(link.get('rel', []))
+            href = link['href']
+            text = link.get_text(strip=True)
+            
+            # Look for rel="tag" (not "category tag") with /tag/ in URL
+            if rel == 'tag' and '/tag/' in href and text:
+                if text not in seen:
+                    tags.append(text)
+                    seen.add(text)
         
         return tags
     
@@ -328,9 +344,10 @@ class WXRExporter:
             with open(html_path, 'r', encoding='utf-8') as f:
                 soup = BeautifulSoup(f.read(), 'lxml')
             
-            # Clean Wayback elements
-            self.strip_wayback_chrome(soup)
+            # Clean Wayback elements - IMPORTANT: dewrap URLs FIRST
+            # Otherwise, content links with web.archive.org URLs get incorrectly removed
             self.dewrap_wayback_urls(soup)
+            self.strip_wayback_chrome(soup)
             
             # Extract metadata
             title = self.extract_title(soup)
