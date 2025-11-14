@@ -125,6 +125,80 @@ class URLDiscoverer:
         
         logger.info(f"Saved to {output_file}")
     
+    async def query_single_url(self, session: aiohttp.ClientSession, url: str) -> bool:
+        """
+        Query CDX API to verify a single URL exists in Wayback Machine.
+        
+        Args:
+            session: aiohttp session for requests
+            url: URL to query
+            
+        Returns:
+            True if URL found in Wayback, False otherwise
+        """
+        cdx_url = (
+            f"https://web.archive.org/cdx/search/cdx"
+            f"?url={url}"
+            f"&output=json"
+            f"&limit=1"
+        )
+        
+        logger.info(f"Querying Wayback Machine for: {url}")
+        logger.debug(f"CDX query: {cdx_url}")
+        
+        try:
+            async with session.get(cdx_url) as response:
+                if response.status != 200:
+                    logger.error(f"CDX API returned status {response.status}")
+                    return False
+                
+                text = await response.text()
+                # CDX returns JSON array, first item is headers
+                if text.strip() and text.count('[') > 0:
+                    logger.info(f"URL found in Wayback Machine")
+                    return True
+                else:
+                    logger.warning(f"URL not found in Wayback Machine")
+                    return False
+        
+        except Exception as e:
+            logger.error(f"Failed to query CDX API: {e}")
+            return False
+    
+    async def discover_single(self, url: str) -> int:
+        """
+        Discover a single URL from Wayback Machine.
+        
+        Args:
+            url: Single URL to extract
+            
+        Returns:
+            Number of URLs discovered (0 or 1)
+        """
+        logger.info(f"Starting single URL extraction for {url}")
+        
+        async with aiohttp.ClientSession(
+            headers={'User-Agent': self.config.user_agent}
+        ) as session:
+            # Query CDX API for this URL
+            found = await self.query_single_url(session, url)
+            
+            if not found:
+                logger.error(f"URL not found in Wayback Machine: {url}")
+                return 0
+            
+            # Save single URL
+            self.save_urls([url])
+            
+            # Update config
+            self.config.discovered = True
+            config_path = self.config.output_dir / 'config.json'
+            self.config.save(config_path)
+            
+            logger.info(f"Single URL extraction complete")
+            
+            return 1
+    
     async def discover(self) -> int:
         """
         Main discovery process.
@@ -163,16 +237,20 @@ class URLDiscoverer:
             return len(unique_urls)
 
 
-async def discover_urls(config: ProjectConfig) -> int:
+async def discover_urls(config: ProjectConfig, single_url: str = None) -> int:
     """
-    Discover URLs for a domain.
+    Discover URLs for a domain or extract a single URL.
     
     Args:
         config: Project configuration
+        single_url: Optional single URL to extract instead of entire site
         
     Returns:
         Number of URLs discovered
     """
     discoverer = URLDiscoverer(config)
-    return await discoverer.discover()
+    if single_url:
+        return await discoverer.discover_single(single_url)
+    else:
+        return await discoverer.discover()
 

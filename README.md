@@ -63,7 +63,19 @@ Query the Wayback Machine to find all archived URLs for your domain:
 waybackpress discover example.com
 ```
 
+**Single URL Extraction:** Extract just one specific post instead of the entire site:
+
+```bash
+waybackpress discover example.com --url https://example.com/2020/01/post-title/
+```
+
+This is useful for:
+- Testing the tool on a single post
+- Recovering a specific lost article
+- Extracting individual content without crawling the entire site
+
 Options:
+- `--url URL`: Extract a single specific URL instead of entire site
 - `--output DIR`: Specify output directory (default: wayback-data/example.com)
 - `--delay SECONDS`: Delay between requests (default: 5)
 - `--concurrency N`: Concurrent requests (default: 2)

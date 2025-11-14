@@ -4,6 +4,7 @@ WordPress WXR 1.2 export generation.
 
 import logging
 import re
+import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import format_datetime
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 from xml.dom import minidom
 
+import trafilatura
 from bs4 import BeautifulSoup
 
 from .config import ProjectConfig
@@ -156,7 +158,61 @@ class WXRExporter:
         return url_date or datetime.now()
     
     def extract_content(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
-        """Extract main content and clean WordPress chrome."""
+        """
+        Extract main content using trafilatura for theme-agnostic extraction.
+        
+        Args:
+            soup: BeautifulSoup object of the page
+            
+        Returns:
+            BeautifulSoup object with extracted content, or None if extraction fails
+        """
+        try:
+            # Convert soup to string for trafilatura
+            html_str = str(soup)
+            
+            # Use trafilatura to extract content
+            extracted = trafilatura.extract(
+                html_str,
+                include_comments=False,
+                include_tables=True,
+                include_images=True,
+                include_links=True,
+                output_format='xml'
+            )
+            
+            if not extracted:
+                logger.debug("Trafilatura returned no content")
+                return None
+            
+            # Convert extracted XML back to HTML
+            try:
+                content_soup = BeautifulSoup(extracted, 'lxml')
+                
+                # Trafilatura returns XML, convert to HTML div
+                content_div = soup.new_tag('div')
+                content_div['class'] = 'extracted-content'
+                
+                # Move all content into the div
+                for elem in content_soup.find('body').children if content_soup.find('body') else []:
+                    if elem.name:  # Skip text nodes
+                        content_div.append(elem)
+                
+                return content_div if content_div.contents else None
+                
+            except Exception as e:
+                logger.debug(f"Failed to parse trafilatura output: {e}")
+                # Fallback: wrap extracted text in div
+                content_div = soup.new_tag('div')
+                content_div.string = extracted
+                return content_div
+                
+        except Exception as e:
+            logger.debug(f"Trafilatura extraction failed: {e}")
+            return None
+    
+    def extract_content_fallback(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
+        """Fallback content extraction using CSS selectors."""
         content = None
         
         # Try to find content area
