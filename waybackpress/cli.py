@@ -18,8 +18,19 @@ from .export import export_wxr
 
 def cmd_discover(args):
     """Discover URLs from Wayback Machine."""
+    # Extract domain from URL if --url is provided
+    single_url = args.url
+    domain = args.domain
+    
+    if single_url:
+        # Extract domain from URL
+        from urllib.parse import urlparse
+        parsed = urlparse(single_url)
+        domain = parsed.netloc or parsed.path.split('/')[0]
+        domain = domain.replace('www.', '')
+    
     config = init_project(
-        domain=args.domain,
+        domain=domain,
         output_dir=args.output,
         delay=args.delay,
         concurrency=args.concurrency,
@@ -27,9 +38,13 @@ def cmd_discover(args):
     
     logger = setup_logging(config, verbose=args.verbose)
     logger.info(f"WaybackPress v{__version__}")
-    logger.info(f"Discovering URLs for {args.domain}")
     
-    count = asyncio.run(discover_urls(config))
+    if single_url:
+        logger.info(f"Extracting single URL: {single_url}")
+        count = asyncio.run(discover_urls(config, single_url=single_url))
+    else:
+        logger.info(f"Discovering URLs for {domain}")
+        count = asyncio.run(discover_urls(config))
     
     if count > 0:
         logger.info(f"Success! Found {count} post URLs")
@@ -176,6 +191,11 @@ Examples:
   # Quick start - run everything
   waybackpress run example.com
   
+  # Extract a single post instead of entire site
+  waybackpress discover example.com --url https://example.com/2020/01/post-title/
+  waybackpress validate --output wayback-data/example.com
+  waybackpress export --output wayback-data/example.com
+  
   # Step by step with more control
   waybackpress discover example.com
   waybackpress validate --output wayback-data/example.com
@@ -196,7 +216,8 @@ Examples:
     
     # Discover command
     discover_parser = subparsers.add_parser('discover', help='Discover URLs from Wayback Machine')
-    discover_parser.add_argument('domain', help='Domain to discover (e.g., example.com)')
+    discover_parser.add_argument('domain', help='Domain to discover (e.g., example.com) or full URL for single post')
+    discover_parser.add_argument('--url', help='Extract single URL instead of entire site (e.g., https://example.com/post-title/)')
     discover_parser.add_argument('--output', type=Path, help='Output directory')
     discover_parser.add_argument('--delay', type=float, default=5.0, help='Delay between requests (default: 5s)')
     discover_parser.add_argument('--concurrency', type=int, default=2, help='Concurrent requests (default: 2)')
