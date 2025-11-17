@@ -91,6 +91,43 @@ class WXRExporter:
             if tag and tag.parent:
                 tag.decompose()
     
+    def normalize_lazy_images(self, soup: BeautifulSoup) -> None:
+        """
+        Normalize lazy-loaded images by promoting data-lazy-src to src.
+        
+        Many WordPress sites use lazy-loading plugins (Jetpack, WP Rocket, etc.)
+        that put placeholder SVGs in src and real URLs in data-lazy-src.
+        After import, these show as broken images because the lazy-loading
+        JavaScript doesn't run.
+        
+        This function fixes them by:
+        1. Finding images with placeholder src (data:image/svg+xml)
+        2. Copying data-lazy-src (or data-src, data-original) to src
+        3. Removing lazy-loading attributes
+        """
+        for img in soup.find_all('img'):
+            src = img.get('src', '')
+            
+            # Check if this is a lazy-loaded placeholder
+            if 'data:image/svg+xml' in src or src.startswith('data:image/svg'):
+                # Look for real image URL in lazy-loading attributes
+                real_url = None
+                lazy_attrs = ['data-lazy-src', 'data-src', 'data-lazy-original', 'data-original']
+                
+                for attr in lazy_attrs:
+                    if img.has_attr(attr):
+                        real_url = img[attr]
+                        break
+                
+                if real_url:
+                    # Promote lazy URL to src
+                    img['src'] = real_url
+                    
+                    # Remove all lazy-loading attributes
+                    for attr in lazy_attrs + ['data-lazy-srcset', 'data-srcset']:
+                        if img.has_attr(attr):
+                            del img[attr]
+    
     def dewrap_wayback_urls(self, soup: BeautifulSoup) -> None:
         """Rewrite Wayback URLs to original URLs."""
         pattern = re.compile(r'https?://web\.archive\.org/web/\d+[a-z_]*/(https?://[^"\s]+)')
@@ -404,9 +441,13 @@ class WXRExporter:
             with open(html_path, 'r', encoding='utf-8') as f:
                 soup = BeautifulSoup(f.read(), 'lxml')
             
-            # Clean Wayback elements - IMPORTANT: dewrap URLs FIRST
-            # Otherwise, content links with web.archive.org URLs get incorrectly removed
+            # Clean Wayback elements - IMPORTANT ORDER:
+            # 1. Dewrap URLs (convert web.archive.org to original URLs)
+            # 2. Normalize lazy images (promote data-lazy-src to src)
+            # 3. Strip Wayback chrome (remove UI elements)
+            # This ensures lazy-src has original URLs and images are working
             self.dewrap_wayback_urls(soup)
+            self.normalize_lazy_images(soup)
             self.strip_wayback_chrome(soup)
             
             # Extract metadata
