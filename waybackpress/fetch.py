@@ -49,7 +49,10 @@ class MediaFetcher:
             next(f)
             for line in f:
                 if line.strip():
-                    url, local_path = line.strip().split('\t')
+                    parts = line.strip().split('\t')
+                    url = parts[0]
+                    local_path = parts[1]
+                    # post_type (parts[2]) not used by media fetcher
                     posts.append({'url': url, 'local_path': local_path})
         
         logger.info(f"Loaded {len(posts)} validated posts")

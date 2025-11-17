@@ -64,8 +64,15 @@ class WXRExporter:
             next(f)  # Skip header
             for line in f:
                 if line.strip():
-                    url, local_path = line.strip().split('\t')
-                    posts.append({'url': url, 'local_path': local_path})
+                    parts = line.strip().split('\t')
+                    url = parts[0]
+                    local_path = parts[1]
+                    post_type = parts[2] if len(parts) > 2 else 'post'
+                    posts.append({
+                        'url': url,
+                        'local_path': local_path,
+                        'post_type': post_type
+                    })
         
         logger.info(f"Loaded {len(posts)} posts to export")
         return posts
@@ -482,6 +489,7 @@ class WXRExporter:
                 'content': content,
                 'categories': categories,
                 'tags': tags,
+                'post_type': post.get('post_type', 'post'),
             }
             
             self.next_post_id += 1
