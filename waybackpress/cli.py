@@ -49,6 +49,7 @@ def cmd_discover(args):
     if count > 0:
         logger.info(f"Success! Found {count} post URLs")
         logger.info(f"Next step: waybackpress validate --output {config.output_dir}")
+        return config  # Return config for use in cmd_run
     else:
         logger.error("No posts found in Wayback Machine")
         sys.exit(1)
@@ -145,7 +146,11 @@ def cmd_run(args):
     logger.info("STEP 1: Discovering URLs")
     logger.info("=" * 60)
     args.domain = args.domain
-    cmd_discover(args)
+    config = cmd_discover(args)
+    
+    # Set output path for subsequent commands
+    if config:
+        args.output = config.output_dir
     
     # Validate
     logger.info("")
