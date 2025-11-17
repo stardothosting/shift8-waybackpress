@@ -416,7 +416,8 @@ class WXRExporter:
         ET.SubElement(item, 'wp:status').text = "publish"
         ET.SubElement(item, 'wp:post_parent').text = "0"
         ET.SubElement(item, 'wp:menu_order').text = "0"
-        ET.SubElement(item, 'wp:post_type').text = "post"
+        # Use post_type from data, default to 'post'
+        ET.SubElement(item, 'wp:post_type').text = post_data.get('post_type', 'post')
         ET.SubElement(item, 'wp:post_password').text = ""
         ET.SubElement(item, 'wp:is_sticky').text = "0"
         

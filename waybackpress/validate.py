@@ -71,17 +71,24 @@ class ContentExtractor:
             'categories': [],
             'tags': [],
             'extraction_method': 'none',
-            'word_count': 0
+            'word_count': 0,
+            'post_type': 'post'
         }
+        
+        # Detect post type (post or page)
+        post_type = self.detect_post_type(soup)
+        result['post_type'] = post_type
         
         # Extract post ID from body classes (works for ALL WP themes)
         post_id = self.extract_post_id(soup)
         
         # Strategy 1: Try WordPress REST API (if post ID found)
         if post_id and self.session:
-            logger.debug(f"Trying wp-json API for post ID {post_id}")
-            if api_data := await self.try_wp_json(url, post_id):
-                return self.parse_wp_json(api_data)
+            logger.debug(f"Trying wp-json API for {post_type} ID {post_id}")
+            if api_data := await self.try_wp_json(url, post_id, post_type):
+                parsed = self.parse_wp_json(api_data)
+                parsed['post_type'] = post_type  # Ensure post_type is set
+                return parsed
         
         # Strategy 2: Try RSS feed content (check if URL is in a feed)
         # Note: This would require fetching /feed/ separately
@@ -137,20 +144,46 @@ class ContentExtractor:
             classes = classes.split()
         
         for cls in classes:
-            # Look for postid-XXX or post-XXX patterns
+            # Look for postid-XXX, post-XXX, or page-id-XXX patterns
             if match := re.match(r'postid-(\d+)', cls):
                 return int(match.group(1))
             if match := re.match(r'post-(\d+)', cls):
                 return int(match.group(1))
+            if match := re.match(r'page-id-(\d+)', cls):
+                return int(match.group(1))
         
         return None
     
-    async def try_wp_json(self, original_url: str, post_id: int) -> Optional[Dict]:
+    def detect_post_type(self, soup: BeautifulSoup) -> str:
         """
-        Try to fetch WordPress REST API JSON for this post.
+        Detect if content is a post or page from body classes.
+        
+        Returns: 'post' or 'page'
+        """
+        body = soup.find('body')
+        if not body:
+            return 'post'
+        
+        classes = body.get('class', [])
+        if isinstance(classes, str):
+            classes = classes.split()
+        
+        # Check for page indicators
+        page_indicators = ['page-template', 'page-id-', 'page ', 'single-page']
+        for cls in classes:
+            for indicator in page_indicators:
+                if indicator in cls:
+                    return 'page'
+        
+        return 'post'
+    
+    async def try_wp_json(self, original_url: str, post_id: int, post_type: str = 'post') -> Optional[Dict]:
+        """
+        Try to fetch WordPress REST API JSON for this post or page.
         Many Wayback snapshots include wp-json endpoints.
         
         Example: https://example.com/wp-json/wp/v2/posts/191
+                 https://example.com/wp-json/wp/v2/pages/123
         """
         if not self.session:
             return None
@@ -160,7 +193,9 @@ class ContentExtractor:
         parsed = urlparse(original_url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}"
         
-        json_url = f"{base_domain}/wp-json/wp/v2/posts/{post_id}"
+        # Use 'posts' or 'pages' endpoint based on type
+        endpoint = 'pages' if post_type == 'page' else 'posts'
+        json_url = f"{base_domain}/wp-json/wp/v2/{endpoint}/{post_id}"
         
         # Try to find this in Wayback Machine
         wayback_json = await self.find_snapshot(json_url)
@@ -565,7 +600,8 @@ class PostValidator:
             'tags': [],
             'word_count': 0,
             'local_path': '',
-            'extraction_method': 'none'
+            'extraction_method': 'none',
+            'post_type': 'post'
         }
         
         # Check if HTML already exists
