@@ -718,9 +718,10 @@ class PostValidator:
         valid_posts_path = paths['valid_posts']
         
         with open(valid_posts_path, 'w') as f:
-            f.write("url\tlocal_path\n")
+            f.write("url\tlocal_path\tpost_type\n")
             for result in valid_posts:
-                f.write(f"{result['url']}\t{result['local_path']}\n")
+                post_type = result.get('post_type', 'post')
+                f.write(f"{result['url']}\t{result['local_path']}\t{post_type}\n")
         
         logger.info(f"Saved {len(valid_posts)} valid posts to {valid_posts_path}")
         
