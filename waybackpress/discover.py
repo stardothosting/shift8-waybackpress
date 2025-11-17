@@ -187,8 +187,25 @@ class URLDiscoverer:
                 logger.error(f"URL not found in Wayback Machine: {url}")
                 return 0
             
-            # Save single URL
-            self.save_urls([url])
+            # Load existing URLs if file exists
+            existing_urls = set()
+            output_file = self.config.get_paths()['discovered_urls']
+            if output_file.exists():
+                try:
+                    with open(output_file, 'r') as f:
+                        lines = f.readlines()
+                        # Skip header
+                        for line in lines[1:]:
+                            if line.strip():
+                                existing_urls.add(line.strip())
+                except Exception as e:
+                    logger.warning(f"Could not load existing URLs: {e}")
+            
+            # Add new URL
+            existing_urls.add(url)
+            
+            # Save all URLs
+            self.save_urls(list(existing_urls))
             
             # Update config
             self.config.discovered = True
