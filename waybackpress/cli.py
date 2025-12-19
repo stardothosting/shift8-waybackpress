@@ -16,6 +16,21 @@ from .fetch import fetch_media
 from .export import export_wxr
 
 
+def normalize_date(date_str):
+    """Normalize date to YYYYMMDDHHMMSS format."""
+    if not date_str:
+        return None
+    # Remove any separators
+    date_str = date_str.replace('-', '').replace(':', '').replace(' ', '')
+    # Pad to full timestamp if needed
+    if len(date_str) == 8:  # YYYYMMDD
+        return date_str + '000000'
+    elif len(date_str) == 14:  # YYYYMMDDHHMMSS
+        return date_str
+    else:
+        raise ValueError(f"Invalid date format: {date_str}. Use YYYYMMDD or YYYYMMDDHHMMSS")
+
+
 def cmd_discover(args):
     """Discover URLs from Wayback Machine."""
     # Extract domain from URL if --url is provided
@@ -29,11 +44,17 @@ def cmd_discover(args):
         domain = parsed.netloc or parsed.path.split('/')[0]
         domain = domain.replace('www.', '')
     
+    # Normalize date range if provided
+    from_date = normalize_date(getattr(args, 'from_date', None))
+    to_date = normalize_date(getattr(args, 'to_date', None))
+    
     config = init_project(
         domain=domain,
         output_dir=args.output,
         delay=args.delay,
         concurrency=args.concurrency,
+        from_date=from_date,
+        to_date=to_date,
     )
     
     logger = setup_logging(config, verbose=args.verbose)
@@ -226,6 +247,8 @@ Examples:
     discover_parser.add_argument('--output', type=Path, help='Output directory')
     discover_parser.add_argument('--delay', type=float, default=5.0, help='Delay between requests (default: 5s)')
     discover_parser.add_argument('--concurrency', type=int, default=2, help='Concurrent requests (default: 2)')
+    discover_parser.add_argument('--from', dest='from_date', help='Start date (YYYYMMDD or YYYYMMDDHHMMSS)')
+    discover_parser.add_argument('--to', dest='to_date', help='End date (YYYYMMDD or YYYYMMDDHHMMSS)')
     discover_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose logging')
     
     # Validate command
@@ -255,6 +278,8 @@ Examples:
     run_parser.add_argument('--skip-media', action='store_true', help='Skip media fetching')
     run_parser.add_argument('--delay', type=float, default=5.0, help='Delay between requests (default: 5s)')
     run_parser.add_argument('--concurrency', type=int, default=2, help='Concurrent requests (default: 2)')
+    run_parser.add_argument('--from', dest='from_date', help='Start date (YYYYMMDD or YYYYMMDDHHMMSS)')
+    run_parser.add_argument('--to', dest='to_date', help='End date (YYYYMMDD or YYYYMMDDHHMMSS)')
     run_parser.add_argument('--title', help='Site title for export')
     run_parser.add_argument('--url', help='Site URL for export')
     run_parser.add_argument('--author-name', default='admin', help='Author name')
