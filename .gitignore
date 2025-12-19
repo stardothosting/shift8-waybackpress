@@ -65,3 +65,6 @@ media/
 !examples/*.json
 !examples/*.yaml
 
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.cursor/rules/snyk_rules.mdc
