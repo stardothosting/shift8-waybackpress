@@ -86,6 +86,12 @@ The simplest way to recover a site:
 waybackpress run example.com
 ```
 
+To limit recovery to a specific date range (e.g., October 2018 to October 2025):
+
+```bash
+waybackpress run example.com --from 20181001 --to 20251031
+```
+
 This will run the complete pipeline: discover URLs, validate posts, fetch media, and generate a WordPress import file.
 
 ## Usage
@@ -106,13 +112,21 @@ waybackpress discover example.com
 waybackpress discover example.com --url https://example.com/2020/01/post-title/
 ```
 
-This is useful for:
-- Testing the tool on a single post
-- Recovering a specific lost article
-- Extracting individual content without crawling the entire site
+**Date Range Filtering:** Limit discovery to specific date range:
+
+```bash
+waybackpress discover example.com --from 20181001 --to 20251031
+```
+
+This queries only snapshots between October 1, 2018 and October 31, 2025. Useful for:
+- Recovering content from specific time periods
+- Avoiding very old or very recent snapshots
+- Reducing processing time for large sites
 
 Options:
 - `--url URL`: Extract a single specific URL instead of entire site
+- `--from DATE`: Start date (YYYYMMDD or YYYYMMDDHHMMSS format)
+- `--to DATE`: End date (YYYYMMDD or YYYYMMDDHHMMSS format)
 - `--output DIR`: Specify output directory (default: wayback-data/example.com)
 - `--delay SECONDS`: Delay between requests (default: 5)
 - `--concurrency N`: Concurrent requests (default: 2)
@@ -182,11 +196,19 @@ Run all stages at once:
 waybackpress run example.com
 ```
 
+With date range:
+
+```bash
+waybackpress run example.com --from 20181001 --to 20251031
+```
+
 Options:
 - `--skip-media`: Skip media fetching
 - `--output DIR`: Output directory
 - `--delay SECONDS`: Request delay
 - `--concurrency N`: Concurrent requests
+- `--from DATE`: Start date (YYYYMMDD or YYYYMMDDHHMMSS)
+- `--to DATE`: End date (YYYYMMDD or YYYYMMDDHHMMSS)
 - All export options (--title, --url, --author-name, --author-email)
 
 ## Output Structure

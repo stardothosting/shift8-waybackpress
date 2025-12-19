@@ -41,7 +41,15 @@ class URLDiscoverer:
             f"&collapse=urlkey"
         )
         
+        # Add date range filters if specified
+        if self.config.from_date:
+            cdx_url += f"&from={self.config.from_date}"
+        if self.config.to_date:
+            cdx_url += f"&to={self.config.to_date}"
+        
         logger.info(f"Querying Wayback CDX API for {self.config.domain}")
+        if self.config.from_date or self.config.to_date:
+            logger.info(f"Date range: {self.config.from_date or 'earliest'} to {self.config.to_date or 'latest'}")
         logger.debug(f"CDX query: {cdx_url}")
         
         try:

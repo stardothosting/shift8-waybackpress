@@ -19,6 +19,8 @@ class ProjectConfig:
     concurrency: int = 2
     skip_media: bool = False
     user_agent: str = "WaybackPress/0.1.0"
+    from_date: Optional[str] = None  # YYYYMMDDHHMMSS format
+    to_date: Optional[str] = None    # YYYYMMDDHHMMSS format
     
     # State tracking
     discovered: bool = False
