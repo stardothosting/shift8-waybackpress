@@ -34,9 +34,10 @@ setup(
     python_requires='>=3.8',
     install_requires=[
         'beautifulsoup4>=4.11.0',
-        'lxml>=4.9.0',
+        'lxml>=5.3.0',
         'aiohttp>=3.8.0',
         'python-dateutil>=2.8.0',
+        'trafilatura>=2.0.0',
     ],
     entry_points={
         'console_scripts': [

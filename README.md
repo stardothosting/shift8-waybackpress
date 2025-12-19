@@ -27,19 +27,56 @@ The tool has built-in safeguards (rate limiting, user-agent identification) but 
 
 ## Installation
 
-### From Source
+### From Source (Recommended)
+
+**Python 3.12+ requires a virtual environment** due to [PEP 668](https://peps.python.org/pep-0668/). This is the recommended approach for all Python versions:
 
 ```bash
 git clone https://github.com/stardothosting/shift8-waybackpress.git
 cd shift8-waybackpress
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # On Linux/macOS
+# OR
+venv\Scripts\activate     # On Windows
+
+# Install package
+pip install -e .
+
+# Verify installation
+waybackpress --version
+```
+
+**When you're done using the tool:**
+
+```bash
+deactivate
+```
+
+**For future use, always activate the virtual environment first:**
+
+```bash
+cd shift8-waybackpress
+source venv/bin/activate
+waybackpress run example.com
+```
+
+### Alternative: System-Wide Installation (Python 3.11 and older)
+
+```bash
 pip install -r requirements.txt
 pip install -e .
 ```
 
+**Note:** This method will fail on Python 3.12+ with an "externally-managed-environment" error.
+
 ### Requirements
 
 - Python 3.8 or higher
-- Dependencies: beautifulsoup4, lxml, aiohttp, python-dateutil
+- Dependencies: beautifulsoup4, lxml, aiohttp, python-dateutil, trafilatura
 
 ## Quick Start
 
@@ -255,6 +292,31 @@ wp media regenerate --yes
 ```
 
 ## Troubleshooting
+
+### Installation Issues
+
+**Error: "externally-managed-environment"**
+
+You're using Python 3.12+ which requires virtual environments. Follow the recommended installation steps above using `python3 -m venv venv`.
+
+**Error: "Cannot update time stamp of directory 'waybackpress.egg-info'"**
+
+The egg-info directory is owned by root. Remove it and reinstall:
+
+```bash
+sudo rm -rf waybackpress.egg-info
+python3 -m venv venv
+source venv/bin/activate
+pip install -e .
+```
+
+**ModuleNotFoundError: No module named 'trafilatura'**
+
+The `setup.py` is missing the `trafilatura` dependency. This is fixed in the latest version. If you're using an older version:
+
+```bash
+pip install trafilatura>=2.0.0
+```
 
 ### No Posts Found
 
