@@ -477,6 +477,8 @@ class PostValidator:
         self.results: List[Dict[str, Any]] = []
         self.extractor = ContentExtractor(config)
         self.processed_urls: Set[str] = set()
+        self.semaphore = asyncio.Semaphore(config.concurrency)
+        self.results_lock = asyncio.Lock()
     
     def load_discovered_urls(self) -> List[str]:
         """Load URLs from discovery phase."""
@@ -492,53 +494,105 @@ class PostValidator:
             next(f)
             return [line.strip() for line in f if line.strip()]
     
+    def scan_existing_html_files(self) -> Dict[str, Path]:
+        """
+        Scan existing HTML files to determine what's already been downloaded.
+        This allows resumption even if validation_report.csv is incomplete.
+        
+        Returns:
+            Dict mapping URL to local file path for already-downloaded files
+        """
+        html_dir = self.config.get_paths()['html']
+        
+        if not html_dir.exists():
+            return {}
+        
+        # Get all HTML files
+        html_files = list(html_dir.glob('*.html'))
+        if not html_files:
+            return {}
+        
+        logger.info(f"Found {len(html_files)} existing HTML files")
+        
+        # For fast resumption, we'll match HTML files to URLs from discovered_urls
+        # by checking which URLs would generate each filename
+        urls_file = self.config.get_paths()['discovered_urls']
+        if not urls_file.exists():
+            # No discovered URLs file, can't map HTML files to URLs
+            return {}
+        
+        with open(urls_file, 'r') as f:
+            # Skip header
+            next(f)
+            urls = [line.strip() for line in f if line.strip()]
+        
+        url_to_file = {}
+        
+        for url in urls:
+            slug = extract_slug_from_url(url) or 'unknown'
+            expected_path = html_dir / f"{slug}.html"
+            if expected_path.exists():
+                url_to_file[url] = expected_path
+        
+        logger.info(f"Mapped {len(url_to_file)} URLs to existing HTML files")
+        return url_to_file
+    
     def load_existing_results(self) -> None:
         """
         Load existing validation results to enable resumption.
         Populates self.results and self.processed_urls from existing files.
+        Also scans for existing HTML files to enable faster resumption.
         """
         validation_report = self.config.get_paths()['validation_report']
         
-        if not validation_report.exists():
-            logger.info("No existing validation results found - starting fresh")
-            return
-        
-        logger.info("Loading existing validation results for resumption...")
-        
-        try:
-            with open(validation_report, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    # Reconstruct result dict
-                    result = {
-                        'url': row['url'],
-                        'valid': row['valid'].lower() == 'true',
-                        'reason': row['reason'],
-                        'title': row['title'] if row['title'] else None,
-                        'date': row['date'] if row['date'] else None,
-                        'author': row['author'] if row['author'] else None,
-                        'categories': row['categories'].split(',') if row['categories'] else [],
-                        'tags': row['tags'].split(',') if row['tags'] else [],
-                        'word_count': int(row['word_count']) if row['word_count'] else 0,
-                        'extraction_method': row['extraction_method'],
-                        'local_path': row['local_path'],
-                        'post_type': row.get('post_type', 'post')
-                    }
-                    self.results.append(result)
-                    self.processed_urls.add(row['url'])
-                    
-                    # Restore content hashes for duplicate detection
-                    # Note: We can't restore actual content, but we can at least
-                    # avoid re-processing the same URL
+        # First, load existing validation results if any
+        if validation_report.exists():
+            logger.info("Loading existing validation results for resumption...")
             
-            logger.info(f"Loaded {len(self.results)} existing results")
-            logger.info(f"Will skip {len(self.processed_urls)} already-processed URLs")
-            
-        except Exception as e:
-            logger.warning(f"Failed to load existing results: {e}")
-            logger.warning("Starting validation from scratch")
-            self.results = []
-            self.processed_urls = set()
+            try:
+                with open(validation_report, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Reconstruct result dict
+                        result = {
+                            'url': row['url'],
+                            'valid': row['valid'].lower() == 'true',
+                            'reason': row['reason'],
+                            'title': row['title'] if row['title'] else None,
+                            'date': row['date'] if row['date'] else None,
+                            'author': row['author'] if row['author'] else None,
+                            'categories': row['categories'].split(',') if row['categories'] else [],
+                            'tags': row['tags'].split(',') if row['tags'] else [],
+                            'word_count': int(row['word_count']) if row['word_count'] else 0,
+                            'extraction_method': row['extraction_method'],
+                            'local_path': row['local_path'],
+                            'post_type': row.get('post_type', 'post')
+                        }
+                        self.results.append(result)
+                        self.processed_urls.add(row['url'])
+                
+                logger.info(f"Loaded {len(self.results)} existing results from report")
+                
+            except Exception as e:
+                logger.warning(f"Failed to load existing results: {e}")
+                self.results = []
+                self.processed_urls = set()
+        
+        # Second, scan for HTML files that exist but aren't in the report
+        # This handles the case where validation crashed before saving
+        existing_html = self.scan_existing_html_files()
+        new_from_html = 0
+        
+        for url in existing_html:
+            if url not in self.processed_urls:
+                # Mark as processed so we skip it
+                self.processed_urls.add(url)
+                new_from_html += 1
+        
+        if new_from_html > 0:
+            logger.info(f"Found {new_from_html} additional URLs with downloaded HTML")
+        
+        logger.info(f"Total URLs to skip: {len(self.processed_urls)}")
     
     async def find_snapshot(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
         """Find a Wayback Machine snapshot for a URL."""
@@ -637,70 +691,72 @@ class PostValidator:
         session: aiohttp.ClientSession,
         url: str
     ) -> Dict[str, Any]:
-        """Validate a single URL and extract metadata."""
-        result = {
-            'url': url,
-            'valid': False,
-            'reason': '',
-            'title': None,
-            'date': None,
-            'author': None,
-            'categories': [],
-            'tags': [],
-            'word_count': 0,
-            'local_path': '',
-            'extraction_method': 'none',
-            'post_type': 'post'
-        }
-        
-        # Check if HTML already exists
-        slug = extract_slug_from_url(url) or 'unknown'
-        local_path = self.config.get_paths()['html'] / f"{slug}.html"
-        
-        if not local_path.exists():
-            # Find snapshot only if we need to download
-            wayback_url = await self.find_snapshot(session, url)
-            if not wayback_url:
-                result['reason'] = 'no_snapshot'
+        """Validate a single URL and extract metadata with concurrency control."""
+        async with self.semaphore:
+            result = {
+                'url': url,
+                'valid': False,
+                'reason': '',
+                'title': None,
+                'date': None,
+                'author': None,
+                'categories': [],
+                'tags': [],
+                'word_count': 0,
+                'local_path': '',
+                'extraction_method': 'none',
+                'post_type': 'post'
+            }
+            
+            # Check if HTML already exists
+            slug = extract_slug_from_url(url) or 'unknown'
+            local_path = self.config.get_paths()['html'] / f"{slug}.html"
+            
+            if not local_path.exists():
+                # Find snapshot only if we need to download
+                wayback_url = await self.find_snapshot(session, url)
+                if not wayback_url:
+                    result['reason'] = 'no_snapshot'
+                    return result
+                
+                # Download HTML
+                downloaded = await self.download_html(session, wayback_url, local_path)
+            else:
+                # File already exists, skip download
+                downloaded = True
+            
+            if not downloaded:
+                result['reason'] = 'download_failed'
                 return result
             
-            # Download HTML
-            downloaded = await self.download_html(session, wayback_url, local_path)
-        else:
-            # File already exists, skip download
-            downloaded = True
-        
-        if not downloaded:
-            result['reason'] = 'download_failed'
-            return result
-        
-        # Read and parse HTML
-        try:
-            with open(local_path, 'r', encoding='utf-8') as f:
-                html = f.read()
-        except Exception as e:
-            logger.debug(f"Failed to read {local_path}: {e}")
-            result['reason'] = 'read_failed'
-            return result
-        
-        # Parse HTML
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=XMLParsedAsHTMLWarning)
-            soup = BeautifulSoup(html, 'lxml')
-        
-        # Strip Wayback chrome
-        soup = self.strip_wayback_chrome(soup)
-        
-        # Extract content and metadata using multi-strategy approach
-        self.extractor.session = session
-        extracted = await self.extractor.extract_all(url, html, soup)
-        
-        # Update result with extracted data
-        result.update(extracted)
-        result['local_path'] = str(local_path)
-        
-        # Apply heuristics
-        return self.apply_heuristics(result)
+            # Read and parse HTML
+            try:
+                with open(local_path, 'r', encoding='utf-8') as f:
+                    html = f.read()
+            except Exception as e:
+                logger.debug(f"Failed to read {local_path}: {e}")
+                result['reason'] = 'read_failed'
+                return result
+            
+            # Parse HTML
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=XMLParsedAsHTMLWarning)
+                soup = BeautifulSoup(html, 'lxml')
+            
+            # Strip Wayback chrome
+            soup = self.strip_wayback_chrome(soup)
+            
+            # Extract content and metadata using multi-strategy approach
+            self.extractor.session = session
+            extracted = await self.extractor.extract_all(url, html, soup)
+            
+            # Update result with extracted data
+            result.update(extracted)
+            result['local_path'] = str(local_path)
+            
+            # Apply heuristics (need to protect seen_hashes with lock)
+            async with self.results_lock:
+                return self.apply_heuristics(result)
     
     def apply_heuristics(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -777,7 +833,7 @@ class PostValidator:
         return len(valid_posts)
     
     async def validate_all(self) -> int:
-        """Main validation process with resumption support."""
+        """Main validation process with resumption support and concurrency."""
         # Load existing results for resumption
         self.load_existing_results()
         
@@ -793,7 +849,8 @@ class PostValidator:
         else:
             logger.info(f"Starting validation of {len(urls)} URLs")
         
-        logger.info(f"Using delay of {self.config.delay}s between requests")
+        logger.info(f"Using concurrency: {self.config.concurrency}")
+        logger.info(f"Using delay: {self.config.delay}s between requests")
         
         if not urls_to_process:
             logger.info("All URLs already processed!")
@@ -803,42 +860,40 @@ class PostValidator:
         async with aiohttp.ClientSession(
             headers={'User-Agent': self.config.user_agent}
         ) as session:
-            # Process URLs (currently sequential, TODO: make concurrent)
-            for i, url in enumerate(urls_to_process, 1):
-                if i % 10 == 0:
-                    total_processed = already_processed + i
-                    logger.info(f"Progress: {total_processed}/{len(urls)} ({total_processed/len(urls)*100:.1f}%)")
-                    import sys
-                    sys.stdout.flush()
+            # Process URLs concurrently in batches
+            batch_size = 100  # Save after each batch
+            total_batches = (len(urls_to_process) + batch_size - 1) // batch_size
+            
+            for batch_idx in range(total_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, len(urls_to_process))
+                batch_urls = urls_to_process[start_idx:end_idx]
                 
-                logger.debug(f"Validating: {url}")
-                try:
-                    result = await self.validate_url(session, url)
-                    self.results.append(result)
-                    self.processed_urls.add(url)
-                except Exception as e:
-                    logger.error(f"Error validating {url}: {e}")
-                    # Create a failed result entry so we don't retry this URL
-                    result = {
-                        'url': url,
-                        'valid': False,
-                        'reason': f'error: {str(e)[:100]}',
-                        'title': None,
-                        'date': None,
-                        'author': None,
-                        'categories': [],
-                        'tags': [],
-                        'word_count': 0,
-                        'local_path': '',
-                        'extraction_method': 'error',
-                        'post_type': 'post'
-                    }
-                    self.results.append(result)
-                    self.processed_urls.add(url)
+                logger.info(f"Processing batch {batch_idx + 1}/{total_batches} ({len(batch_urls)} URLs)")
                 
-                # Save intermediate results every 50 URLs
-                if i % 50 == 0:
-                    self.save_results()
+                # Create tasks for concurrent processing
+                tasks = []
+                for url in batch_urls:
+                    task = self.validate_url_with_error_handling(session, url)
+                    tasks.append(task)
+                
+                # Wait for all tasks in batch to complete
+                batch_results = await asyncio.gather(*tasks)
+                
+                # Add results
+                async with self.results_lock:
+                    for result in batch_results:
+                        self.results.append(result)
+                        self.processed_urls.add(result['url'])
+                
+                # Save after each batch
+                self.save_results()
+                
+                # Progress update
+                total_processed = already_processed + end_idx
+                logger.info(f"Progress: {total_processed}/{len(urls)} ({total_processed/len(urls)*100:.1f}%)")
+                import sys
+                sys.stdout.flush()
         
         # Final save
         valid_count = self.save_results()
@@ -865,6 +920,33 @@ class PostValidator:
             logger.info(f"  {method}: {count}")
         
         return valid_count
+    
+    async def validate_url_with_error_handling(
+        self,
+        session: aiohttp.ClientSession,
+        url: str
+    ) -> Dict[str, Any]:
+        """Wrapper for validate_url with error handling."""
+        try:
+            logger.debug(f"Validating: {url}")
+            return await self.validate_url(session, url)
+        except Exception as e:
+            logger.error(f"Error validating {url}: {e}")
+            # Create a failed result entry so we don't retry this URL
+            return {
+                'url': url,
+                'valid': False,
+                'reason': f'error: {str(e)[:100]}',
+                'title': None,
+                'date': None,
+                'author': None,
+                'categories': [],
+                'tags': [],
+                'word_count': 0,
+                'local_path': '',
+                'extraction_method': 'error',
+                'post_type': 'post'
+            }
 
 
 async def validate_posts(config: ProjectConfig) -> int:
