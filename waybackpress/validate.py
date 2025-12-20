@@ -476,6 +476,7 @@ class PostValidator:
         self.seen_titles: Set[str] = set()
         self.results: List[Dict[str, Any]] = []
         self.extractor = ContentExtractor(config)
+        self.processed_urls: Set[str] = set()
     
     def load_discovered_urls(self) -> List[str]:
         """Load URLs from discovery phase."""
@@ -490,6 +491,54 @@ class PostValidator:
             # Skip header
             next(f)
             return [line.strip() for line in f if line.strip()]
+    
+    def load_existing_results(self) -> None:
+        """
+        Load existing validation results to enable resumption.
+        Populates self.results and self.processed_urls from existing files.
+        """
+        validation_report = self.config.get_paths()['validation_report']
+        
+        if not validation_report.exists():
+            logger.info("No existing validation results found - starting fresh")
+            return
+        
+        logger.info("Loading existing validation results for resumption...")
+        
+        try:
+            with open(validation_report, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Reconstruct result dict
+                    result = {
+                        'url': row['url'],
+                        'valid': row['valid'].lower() == 'true',
+                        'reason': row['reason'],
+                        'title': row['title'] if row['title'] else None,
+                        'date': row['date'] if row['date'] else None,
+                        'author': row['author'] if row['author'] else None,
+                        'categories': row['categories'].split(',') if row['categories'] else [],
+                        'tags': row['tags'].split(',') if row['tags'] else [],
+                        'word_count': int(row['word_count']) if row['word_count'] else 0,
+                        'extraction_method': row['extraction_method'],
+                        'local_path': row['local_path'],
+                        'post_type': row.get('post_type', 'post')
+                    }
+                    self.results.append(result)
+                    self.processed_urls.add(row['url'])
+                    
+                    # Restore content hashes for duplicate detection
+                    # Note: We can't restore actual content, but we can at least
+                    # avoid re-processing the same URL
+            
+            logger.info(f"Loaded {len(self.results)} existing results")
+            logger.info(f"Will skip {len(self.processed_urls)} already-processed URLs")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load existing results: {e}")
+            logger.warning("Starting validation from scratch")
+            self.results = []
+            self.processed_urls = set()
     
     async def find_snapshot(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
         """Find a Wayback Machine snapshot for a URL."""
@@ -697,7 +746,7 @@ class PostValidator:
         
         fieldnames = [
             'url', 'valid', 'reason', 'title', 'date', 'author',
-            'categories', 'tags', 'word_count', 'extraction_method', 'local_path'
+            'categories', 'tags', 'word_count', 'extraction_method', 'local_path', 'post_type'
         ]
         
         with open(report_path, 'w', newline='', encoding='utf-8') as f:
@@ -728,25 +777,64 @@ class PostValidator:
         return len(valid_posts)
     
     async def validate_all(self) -> int:
-        """Main validation process."""
+        """Main validation process with resumption support."""
+        # Load existing results for resumption
+        self.load_existing_results()
+        
         urls = self.load_discovered_urls()
         
-        logger.info(f"Starting validation of {len(urls)} URLs")
+        # Filter out already-processed URLs
+        urls_to_process = [url for url in urls if url not in self.processed_urls]
+        already_processed = len(urls) - len(urls_to_process)
+        
+        if already_processed > 0:
+            logger.info(f"Resuming validation: {already_processed} URLs already processed")
+            logger.info(f"Processing remaining {len(urls_to_process)} URLs")
+        else:
+            logger.info(f"Starting validation of {len(urls)} URLs")
+        
         logger.info(f"Using delay of {self.config.delay}s between requests")
+        
+        if not urls_to_process:
+            logger.info("All URLs already processed!")
+            valid_count = len([r for r in self.results if r['valid']])
+            return valid_count
         
         async with aiohttp.ClientSession(
             headers={'User-Agent': self.config.user_agent}
         ) as session:
             # Process URLs (currently sequential, TODO: make concurrent)
-            for i, url in enumerate(urls, 1):
+            for i, url in enumerate(urls_to_process, 1):
                 if i % 10 == 0:
-                    logger.info(f"Progress: {i}/{len(urls)} ({i/len(urls)*100:.1f}%)")
+                    total_processed = already_processed + i
+                    logger.info(f"Progress: {total_processed}/{len(urls)} ({total_processed/len(urls)*100:.1f}%)")
                     import sys
                     sys.stdout.flush()
                 
                 logger.debug(f"Validating: {url}")
-                result = await self.validate_url(session, url)
-                self.results.append(result)
+                try:
+                    result = await self.validate_url(session, url)
+                    self.results.append(result)
+                    self.processed_urls.add(url)
+                except Exception as e:
+                    logger.error(f"Error validating {url}: {e}")
+                    # Create a failed result entry so we don't retry this URL
+                    result = {
+                        'url': url,
+                        'valid': False,
+                        'reason': f'error: {str(e)[:100]}',
+                        'title': None,
+                        'date': None,
+                        'author': None,
+                        'categories': [],
+                        'tags': [],
+                        'word_count': 0,
+                        'local_path': '',
+                        'extraction_method': 'error',
+                        'post_type': 'post'
+                    }
+                    self.results.append(result)
+                    self.processed_urls.add(url)
                 
                 # Save intermediate results every 50 URLs
                 if i % 50 == 0:

@@ -36,27 +36,53 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def extract_slug_from_url(url: str) -> Optional[str]:
+def extract_slug_from_url(url: str, max_length: int = 200) -> Optional[str]:
     """
-    Extract the post slug from a WordPress URL.
+    Extract the post slug from a WordPress URL with length limits.
     
     Args:
         url: WordPress post URL
+        max_length: Maximum slug length before hashing (default 200)
         
     Returns:
         Post slug or None if not found
     """
+    # Parse URL to get just the path component
+    parsed = urlparse(url)
+    path = parsed.path
+    
+    # Empty path or just "/" means no slug
+    if not path or path == '/':
+        return None
+    
     # Match WordPress permalink pattern: /YYYY/MM/DD/slug/
-    match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/([^/]+)/?$', url)
+    match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/([^/]+)/?$', path)
     if match:
-        return match.group(4)
+        slug = match.group(4)
+    else:
+        # Try simpler pattern: /slug/
+        # Remove leading/trailing slashes and check if there's content
+        path_stripped = path.strip('/')
+        if not path_stripped or '/' in path_stripped:
+            # Either empty or has multiple path segments (not a simple slug)
+            # For multiple segments, take the last one
+            parts = path_stripped.split('/')
+            if parts and parts[-1]:
+                slug = parts[-1]
+            else:
+                return None
+        else:
+            slug = path_stripped
     
-    # Try simpler pattern: /slug/
-    match = re.search(r'/([^/]+)/?$', url)
-    if match:
-        return match.group(1)
+    # Handle excessively long slugs to avoid filesystem limits
+    # Most filesystems have a 255-byte filename limit
+    if len(slug) > max_length:
+        # Use hash of full slug + truncated prefix for readability
+        slug_hash = hashlib.sha256(slug.encode('utf-8')).hexdigest()[:16]
+        slug_prefix = slug[:max_length - 20]  # Leave room for hash and extension
+        slug = f"{slug_prefix}_{slug_hash}"
     
-    return None
+    return slug
 
 
 def extract_date_from_url(url: str) -> Optional[datetime]:
