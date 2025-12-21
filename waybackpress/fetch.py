@@ -58,6 +58,22 @@ class MediaFetcher:
         logger.info(f"Loaded {len(posts)} validated posts")
         return posts
     
+    def strip_wayback_url(self, url: str) -> str:
+        """
+        Strip Wayback Machine wrapper from URL to get original URL.
+        
+        Args:
+            url: Potentially Wayback-wrapped URL
+            
+        Returns:
+            Original URL without Wayback wrapper (or original if not a Wayback URL)
+        """
+        from .utils import strip_wayback_url as util_strip
+        original, _ = util_strip(url)
+        # If strip_wayback_url returns None, the URL wasn't a Wayback URL
+        # so we return it as-is
+        return original if original is not None else url
+    
     def extract_media_urls(self, html_path: Path, base_url: str) -> Set[str]:
         """
         Extract media URLs from HTML file.
@@ -67,7 +83,7 @@ class MediaFetcher:
             base_url: Base URL for resolving relative URLs
             
         Returns:
-            Set of absolute media URLs
+            Set of absolute media URLs (stripped of Wayback wrapper)
         """
         try:
             with open(html_path, 'r', encoding='utf-8') as f:
@@ -81,7 +97,9 @@ class MediaFetcher:
                 if src:
                     absolute_url = urljoin(base_url, src)
                     if absolute_url.startswith('http'):
-                        media_urls.add(absolute_url)
+                        # Strip Wayback wrapper if present
+                        original_url = self.strip_wayback_url(absolute_url)
+                        media_urls.add(original_url)
             
             # CSS files
             for link in soup.find_all('link', rel='stylesheet'):
@@ -89,7 +107,9 @@ class MediaFetcher:
                 if href:
                     absolute_url = urljoin(base_url, href)
                     if absolute_url.startswith('http'):
-                        media_urls.add(absolute_url)
+                        # Strip Wayback wrapper if present
+                        original_url = self.strip_wayback_url(absolute_url)
+                        media_urls.add(original_url)
             
             # JavaScript files
             for script in soup.find_all('script'):
@@ -97,7 +117,9 @@ class MediaFetcher:
                 if src:
                     absolute_url = urljoin(base_url, src)
                     if absolute_url.startswith('http'):
-                        media_urls.add(absolute_url)
+                        # Strip Wayback wrapper if present
+                        original_url = self.strip_wayback_url(absolute_url)
+                        media_urls.add(original_url)
             
             return media_urls
         
