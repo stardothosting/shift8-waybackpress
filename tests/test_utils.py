@@ -124,5 +124,126 @@ def test_extract_date_from_url():
     assert extract_date_from_url("https://example.com/my-post/") is None
 
 
-# Add more tests as needed
+# Tests for get_local_path_for_url (media filename length handling)
+
+def test_get_local_path_normal():
+    """Test get_local_path_for_url with normal-length filenames."""
+    from pathlib import Path
+    from waybackpress.utils import get_local_path_for_url
+    
+    url = "https://example.com/images/photo.jpg"
+    base_dir = Path("/tmp/test")
+    
+    result = get_local_path_for_url(url, base_dir)
+    
+    # Should preserve the original filename
+    assert result.name == "photo.jpg"
+    assert "example.com" in str(result)
+    assert "images" in str(result)
+
+
+def test_get_local_path_long_filename():
+    """Test get_local_path_for_url with extremely long filename (like fbcdn error)."""
+    from pathlib import Path
+    from waybackpress.utils import get_local_path_for_url
+    
+    # The actual problematic URL from the batman-news.com error
+    long_filename = "tcw2GCrONSnJ3tfifSrEDIbhNuGHP_1kVgj08kobLA4ixwHfQDRF3kx7g9G_ymiJ9RTN6vXXzuPqxWTehjwxIwymglkeAxgaJlzGopZf6N0Egb4Xa1SDhjYfR1IjDQuHdPFi4Jr6krxoX4i4j70Rg_chV0SrWv9Sivw9-fAozIMNFBkkw1JtOGoHMq0Lud-_SLey5mDURRE7xhrdu1tkd57K2S-nu_Slhf0i_YyBHl-lElGzTHLytctlDrzau-DNq4XdKsc9Ol6Gkjq0OVeavkZc4HIHnC8wypiAW_bfk0L-xMLewjyxVHsl91YGT8hC1LYw5WWi7I.js"
+    url = f"https://static.xx.fbcdn.net/rsrc.php/v4i1mX4/yn/l/fr_FR-j/{long_filename}"
+    base_dir = Path("/tmp/test")
+    
+    result = get_local_path_for_url(url, base_dir)
+    filename = result.name
+    
+    # Filename should be truncated
+    assert len(filename) <= 200, f"Filename too long: {len(filename)} chars"
+    
+    # Should preserve .js extension
+    assert filename.endswith(".js"), "Should preserve file extension"
+    
+    # Should contain hash for uniqueness
+    assert "_" in filename, "Should contain hash separator"
+    
+    # Total path should work on filesystem (under 255 chars for filename)
+    assert len(filename) < 250, f"Filename still too long for filesystem: {len(filename)}"
+
+
+def test_get_local_path_preserves_extension():
+    """Test that file extensions are preserved when truncating."""
+    from pathlib import Path
+    from waybackpress.utils import get_local_path_for_url
+    
+    extensions = ['.js', '.css', '.jpg', '.png', '.gif', '.svg', '.woff2']
+    
+    for ext in extensions:
+        long_name = "a" * 300 + ext
+        url = f"https://example.com/path/{long_name}"
+        base_dir = Path("/tmp/test")
+        
+        result = get_local_path_for_url(url, base_dir)
+        
+        assert result.name.endswith(ext), f"Should preserve {ext} extension"
+        assert len(result.name) <= 200, f"Filename too long even after truncation"
+
+
+def test_get_local_path_uniqueness():
+    """Test that different long filenames produce different paths."""
+    from pathlib import Path
+    from waybackpress.utils import get_local_path_for_url
+    
+    # Two different long filenames
+    long_name1 = "a" * 300 + ".js"
+    long_name2 = "b" * 300 + ".js"
+    
+    url1 = f"https://example.com/path/{long_name1}"
+    url2 = f"https://example.com/path/{long_name2}"
+    base_dir = Path("/tmp/test")
+    
+    result1 = get_local_path_for_url(url1, base_dir)
+    result2 = get_local_path_for_url(url2, base_dir)
+    
+    # Different URLs should produce different filenames
+    assert result1.name != result2.name, "Different long filenames should hash differently"
+    
+    # Both should be under the limit
+    assert len(result1.name) <= 200
+    assert len(result2.name) <= 200
+
+
+def test_get_local_path_no_extension():
+    """Test handling of long filenames without extensions."""
+    from pathlib import Path
+    from waybackpress.utils import get_local_path_for_url
+    
+    # Long filename with no extension
+    long_name = "a" * 300
+    url = f"https://example.com/path/{long_name}"
+    base_dir = Path("/tmp/test")
+    
+    result = get_local_path_for_url(url, base_dir)
+    
+    # Should still truncate and hash
+    assert len(result.name) <= 200, "Should truncate even without extension"
+    assert "_" in result.name, "Should contain hash"
+
+
+def test_get_local_path_boundary_length():
+    """Test filenames at the boundary of 200 characters."""
+    from pathlib import Path
+    from waybackpress.utils import get_local_path_for_url
+    
+    base_dir = Path("/tmp/test")
+    
+    # Just under the limit (should pass through unchanged)
+    name_199 = "a" * 195 + ".jpg"  # 199 chars total
+    url_199 = f"https://example.com/{name_199}"
+    result_199 = get_local_path_for_url(url_199, base_dir)
+    assert result_199.name == name_199, "199-char filename should pass through"
+    
+    # Just over the limit (should be truncated)
+    name_201 = "a" * 197 + ".jpg"  # 201 chars total
+    url_201 = f"https://example.com/{name_201}"
+    result_201 = get_local_path_for_url(url_201, base_dir)
+    assert result_201.name != name_201, "201-char filename should be truncated"
+    assert len(result_201.name) <= 200, "Truncated filename should be under limit"
 
