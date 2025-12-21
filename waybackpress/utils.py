@@ -197,13 +197,14 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 
-def get_local_path_for_url(url: str, base_dir: Path) -> Path:
+def get_local_path_for_url(url: str, base_dir: Path, max_filename_length: int = 200) -> Path:
     """
-    Generate a local file path for a given URL.
+    Generate a local file path for a given URL with filename length limits.
     
     Args:
         url: URL to generate path for
         base_dir: Base directory for storing files
+        max_filename_length: Maximum filename length before hashing (default 200)
         
     Returns:
         Path object for local storage
@@ -216,8 +217,38 @@ def get_local_path_for_url(url: str, base_dir: Path) -> Path:
     # Decode URL encoding
     path = unquote(path)
     
-    # Construct full path
-    full_path = base_dir / parsed.netloc / path
+    # Split path into directory and filename
+    path_obj = Path(path)
+    filename = path_obj.name
+    directory = path_obj.parent
+    
+    # Handle excessively long filenames to avoid filesystem limits
+    # Most filesystems have a 255-byte filename limit
+    if len(filename) > max_filename_length:
+        # Preserve file extension if present
+        file_parts = filename.rsplit('.', 1)
+        if len(file_parts) == 2 and len(file_parts[1]) <= 10:
+            # Has a reasonable extension
+            name_part = file_parts[0]
+            ext_part = '.' + file_parts[1]
+        else:
+            # No extension or extension is too long
+            name_part = filename
+            ext_part = ''
+        
+        # Create hash of full filename for uniqueness
+        filename_hash = hashlib.sha256(filename.encode('utf-8')).hexdigest()[:16]
+        
+        # Truncate name and append hash
+        max_name_length = max_filename_length - len(ext_part) - 17  # 17 for _hash
+        truncated_name = name_part[:max_name_length]
+        filename = f"{truncated_name}_{filename_hash}{ext_part}"
+    
+    # Reconstruct path with potentially shortened filename
+    if directory:
+        full_path = base_dir / parsed.netloc / directory / filename
+    else:
+        full_path = base_dir / parsed.netloc / filename
     
     # Ensure parent directory
     full_path.parent.mkdir(parents=True, exist_ok=True)
