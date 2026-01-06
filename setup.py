@@ -34,7 +34,8 @@ setup(
     python_requires='>=3.8',
     install_requires=[
         'beautifulsoup4>=4.11.0',
-        'lxml>=5.3.0',
+        'lxml>=5.3.0,<6.0.0',  # lxml 5.2.0+ removed html.clean module
+        'lxml_html_clean>=0.1.0',  # Required by trafilatura/justext for lxml.html.clean
         'aiohttp>=3.8.0',
         'python-dateutil>=2.8.0',
         'trafilatura>=2.0.0',
